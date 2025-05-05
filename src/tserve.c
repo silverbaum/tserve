@@ -107,6 +107,25 @@ void get_mime(const char *file_name, struct route_file *route) {
 	 	route->mime = strdup("None");
 }
 
+FILE *
+open_file(const char *filename)
+{
+	FILE *fs;
+	char path[100];
+	if ((fs = fopen(filename, "r")) != NULL)
+		return fs;
+
+	snprintf(path, 100, "templates/%s", filename);
+	if ((fs=fopen(path, "r")) != NULL)
+		return fs;
+
+	snprintf(path, 100, "static/%s", filename);
+	if ((fs=fopen(path, "r")) != NULL)
+		return fs;
+
+
+	return NULL;
+}
 
 struct route_file*
 _load_file(const char *file, FILE* fs)
@@ -129,7 +148,7 @@ _load_file(const char *file, FILE* fs)
 	}
 
 	if (!fs) {
-		fstream = fopen(file, "r");
+		fstream = open_file(file);
 		if (fstream == NULL) {
 			fprintf(stderr, "Failed to open %s\n", file);
 			perror(" open");
@@ -201,14 +220,11 @@ get_respond(const int client_fd, const struct route_file *file)
 	return 0;
 }
 
-/**  SERVER  **/
 
-/* Matches the HTTP request path with a function to serve said path;
- * return values: 1 for no matches, 0 for success, -1 for failure */
+/* Matches the HTTP request path with a function/file to serve said path; */
 int
 serve(struct request req, const int filedes)
 {
-	int result = 1;
 
 	struct route *r = search_route(routes, req.path);
 	if (r && r->func) {
@@ -224,17 +240,16 @@ serve(struct request req, const int filedes)
 	}
 
 
-	//if route not defined just serve and load file plain and simple
 	FILE* fstream;
-	if ((fstream = fopen(&req.path[1], "r")) != NULL) {
-		get_respond(filedes, new_route(req.path, fstream));
+	if ((fstream = open_file(&req.path[1])) != NULL) {
+		get_respond(filedes, new_route(&req.path[1], fstream));
 		return 0;
 	}
 
 	const int nflen = strlen(NOT_FOUND);
 	write(filedes, NOT_FOUND, nflen); 
 	dfprintf(stderr, "Not found");
-	return result;
+	return -1;
 }
 
 int

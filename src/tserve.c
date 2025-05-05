@@ -24,12 +24,11 @@
 
 #include "tserve.h"
 
-#define MAXMSG 4096
+#define MAXMSG 8192
 #define MAX_EVENTS 1024
 #define DEFAULT_BUFSIZE 8192
 #define IMAGE_BUFSIZE 524288
 
-#define LEN(X) sizeof((X)) / sizeof((X)[0])
 
 
 #ifdef DEBUG
@@ -38,6 +37,13 @@
 #ifndef DEBUG
 #define dfprintf(x, y, ...)
 #endif
+
+static const char *NOT_FOUND = "HTTP/1.1 404 Not Found\nContent-Length:96\nContent-Type: text/html\n\n\
+				<!doctype html><html><head><title>Not Found</title></head><body><h1>Not found</h1></body></html>";
+
+struct list *routes;
+struct list *__route_files;
+
 
 void
 append_route(struct list *l, char *routename, void(*func)(int))
@@ -64,6 +70,7 @@ search_route(struct list *l, char *routename)
 	return NULL;
 }
 
+
 struct route_file *
 search_route_file(struct list *l, char *routename)
 {
@@ -81,16 +88,14 @@ search_route_file(struct list *l, char *routename)
 }
 
 
-const char *NOT_FOUND = "HTTP/1.1 404 Not Found\nContent-Length:96\nContent-Type: text/html\n\n\
-				<!doctype html><html><head><title>Not Found</title></head><body><h1>Not found</h1></body></html>";
-
-struct list *routes;
-struct list *__route_files;
-
 
 void get_mime(const char *file_name, struct route_file *route) {
 	char *file_type;
 	file_type = strchr(file_name, '.');
+	if(!file_type) {
+		route->mime = strdup("None");
+		return;
+	}
 	dfprintf(stderr, "extension: %s\n", file_type);
 
 	if(!strcmp(file_type, ".html"))

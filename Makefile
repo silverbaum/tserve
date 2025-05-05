@@ -16,5 +16,8 @@ util.o: $(SRC)/util.c
 sock.o: $(SRC)/sock.c
 	$(CC) $(CFLAGS) -c $(SRC)/sock.c $(INC)
 
+DEBUG: 
+	$(CC) $(CFLAGS) -c $(SRC)/main.c -o tserve_debug.o -DDEBUG -ggdb -fsanitize=address
+
 clean:
 	rm *.o

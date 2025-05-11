@@ -4,7 +4,6 @@
 #define __linux__ 1
 
 #include <stdio.h>
-#include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -16,7 +15,6 @@
 #include <string.h>
 #include <getopt.h>
 
-#include <assert.h>
 #include "sock.h"
 #include "util.h"
 #define LIST_IMPL
@@ -30,7 +28,6 @@
 #define IMAGE_BUFSIZE 524288
 
 
-
 #ifdef DEBUG
 #define dfprintf fprintf
 #endif
@@ -42,14 +39,14 @@ static const char *NOT_FOUND = "HTTP/1.1 404 Not Found\nContent-Length:96\nConte
 				<!doctype html><html><head><title>Not Found</title></head><body><h1>Not found</h1></body></html>";
 
 struct list *routes;
+struct list *post_routes;
 struct list *__route_files;
 
-
 void
-append_route(struct list *l, char *routename, void(*func)(int))
+append_route(struct list *l, char *routename, void(*func)(struct request*))
 {
 	if(!l)
-		l = xmalloc(sizeof(*l));
+		return;
 	struct route *new = xmalloc(sizeof(*new));
 	new->name = routename;
 	new->func = func;
@@ -108,6 +105,8 @@ void get_mime(const char *file_name, struct route_file *route) {
 		route->mime = strdup("image/png");
 	else if (!strcmp(file_type, ".txt"))
 		route->mime = strdup("text/plain");
+	else if (!strcmp(file_type, ".json"))
+		route->mime = strdup("application/json");
 	else
 	 	route->mime = strdup("None");
 }
@@ -132,17 +131,16 @@ open_file(const char *filename)
 	return NULL;
 }
 
-struct route_file*
+static struct route_file*
 _load_file(const char *file, FILE* fs)
 {	
-	/* add dynamic file loading runtime? */
 	FILE *fstream;
 	ssize_t i;
 	struct route_file *route = xmalloc(sizeof(*route));
 
 	route->name = strdup(file);
 	route->docsize = 0;
-
+	
 	get_mime(file, route);
 	if(!strncmp(route->mime, "image", 5)) {
 		route->buf = xmalloc(IMAGE_BUFSIZE);
@@ -172,16 +170,14 @@ _load_file(const char *file, FILE* fs)
 
 	fclose(fstream) < 0 ? perror("close") : 0;
 
-	assert(route->buf && (route->bufsize > 0) && route->docsize > 0);
-	assert(route->mime && route->name);
 	return route;
 }
 
 struct route_file*
-load_file(const char *file){
+load_file(const char *file)
+{
 	return _load_file(file, NULL);
 }
-
 
 struct route_file *
 new_route(const char *path, FILE *stream)
@@ -192,68 +188,102 @@ new_route(const char *path, FILE *stream)
 }
 
 int
-get_respond(const int client_fd, const struct route_file *file)
+get_respond(const struct request *req, const struct route_file *file)
 {
 	char response[200];
 	
 	if(!file){
+		dfprintf(stderr, "file is NULL\n");
 		return -1;
-		dfprintf(stderr, "file is NULL: %d\n", -1);
 	}
-	assert(file->name);
-	assert(file->buf);
-	assert(file->bufsize);
-	assert(file->mime);
 
 	dfprintf(stderr, "\nroute name: %s, route type: %s route size: %lu, route docsz: %lu\n",
 			 file->name, file->mime, file->bufsize, file->docsize);
 
-
 	snprintf(response, 200, "HTTP/1.1 200 OK\nContent-Length: %lu\nContent-Type: %s\n\n",
 			 file->docsize, file->mime);
 
-
-	if ((write_all(client_fd, response, strlen(response))) < 0
-	 || (write_all(client_fd, file->buf, file->docsize)) < 0) {
+	if ((write_all(req->client_fd, response, strlen(response))) < 0
+	 || (write_all(req->client_fd, file->buf, file->docsize)) < 0) {
 		perror("get_response: write");
 	}
 
 	dfprintf(stderr, "\nserving client:\n%s\n", response);
 
-
-	fsync(client_fd);
+	fsync(req->client_fd);
 	return 0;
 }
 
+int
+get_respond_raw(const struct request *req, const char *response, char* mime)
+{
+	if (!response)
+		return -1;
+
+	char http_response[200];
+
+	snprintf(http_response, 200, "HTTP/1.1 200 OK\nContent-Length: %lu\nContent-Type: %s\n\n",
+			 strlen(response), mime);
+
+	if (write_all(req->client_fd, http_response, strlen(http_response)) < 0
+	|| (write_all(req->client_fd, (void*)response, strlen(response)) < 0)) {
+		perror("get_respond_text: write_all");
+		return -1;
+	}
+	
+	return 0;
+}
+
+int
+get_respond_text(const struct request *req, const char *response)
+{
+	return get_respond_raw(req, response, "text/plain");
+}
+
+int
+get_respond_json(const struct request *req, const char *response)
+{
+	return get_respond_raw(req, response, "application/json");
+}
 
 /* Matches the HTTP request path with a function/file to serve said path; */
 int
-serve(struct request req, const int filedes)
+serve(struct request *req)
 {
+	struct route *r;
 
-	struct route *r = search_route(routes, req.path);
+	if (!strncmp(req->method, "POST", 4)){
+		r = search_route(post_routes, req->path);
+		if (r) {
+			(*r->func)(req);
+			return 0;
+		} else {
+			return -1;
+		}
+	}
+
+	r = search_route(routes, req->path);
 	if (r && r->func) {
-		(*r->func)(filedes);
+		(*r->func)(req);
 		return 0;
 	}
 
-	
-	struct route_file *rf = search_route_file(__route_files, req.path);
+	struct route_file *rf = search_route_file(__route_files, req->path);
 	if (rf) {
-		get_respond(filedes, rf);
+		get_respond(req, rf);
 		return 0;
 	}
 
 
 	FILE* fstream;
-	if ((fstream = open_file(&req.path[1])) != NULL) {
-		get_respond(filedes, new_route(&req.path[1], fstream));
+	if ((fstream = open_file(&req->path[1])) != NULL) {
+		get_respond(req, new_route(&req->path[1], fstream));
 		return 0;
 	}
 
 	const int nflen = strlen(NOT_FOUND);
-	write(filedes, NOT_FOUND, nflen); 
-	dfprintf(stderr, "Not found");
+	write(req->client_fd, NOT_FOUND, nflen); 
+	dfprintf(stderr, "%s: Not found", req->path);
 	return -1;
 }
 
@@ -262,31 +292,45 @@ process_request(const int filedes, char *buffer)
 {
 	char *token;
 
-	struct request req;
+	struct request *req = malloc(sizeof(*req));
+	if (!req){
+		perror("malloc");
+		return -1;
+	}
+	req->client_fd = filedes;
+
+	char *body = strstr(buffer, "\r\n\r\n");
+	if (body){
+		dfprintf(stderr, "BODY: %s", body);
+	}
+	req->body = body ? strdup(body+1) : strdup(buffer);
 
 	const char *delim = " \r\n";
 	const char *br = "HTTP/1.1 400 Bad Request";
-
-
+	
 	token = strtok(buffer, delim);
-	req.method = token;
+	req->method = strdup(token);
 	dfprintf(stderr,"first token: '%s'\n", token);
 
 	token = strtok(NULL, delim);
 	dfprintf(stderr, "second token: '%s'\n", token);
-	req.path = token;
+	req->path = strdup(token);
 
 	token = strtok(NULL, delim);
-	req.protocol = token;
+	req->protocol = strdup(token);
 	dfprintf(stderr, "third token: '%s'\n", token);
-	if (!strncmp(token, "HTTP", 4)){
-		return serve(req, filedes);
-	} else {
-		write(filedes, br, 25) < 0 ? perror("process_request: write") : 0;
-		return -1;
-	}
+	dfprintf(stderr, "method: %s, path: %s, proto: %s\n",
+		req->method, req->path, req->protocol);
+	if (strncmp(token, "HTTP", 4) != 0)
+		goto badrequest;
+
+	return serve(req);
 
 	return 0;
+
+	badrequest:
+		write(filedes, br, 25) < 0 ? perror("process_request: write") : 0;
+		return -1;
 }
 
 int
@@ -295,7 +339,7 @@ read_from_client(const int filedes)
 	char *buffer = (char *)xmalloc(MAXMSG);
 	long nbytes;
 
-	nbytes = read(filedes, buffer, MAXMSG);
+	nbytes = recv(filedes, buffer, MAXMSG, MSG_WAITALL);
 	if (nbytes < 0) {
 		/* Read error. */
 		perror("read");
@@ -317,21 +361,18 @@ read_from_client(const int filedes)
 	return 0;
 }
 
-static inline void help(const char* arg){
-printf("Usage: %s [OPTION] [argument]..\noptions:\n\
--f, --file		choose root file\n\
--p, --port		choose the port to which the socket is bound\n\
--h, --help		display this help information and exit\n", arg);
-}
-
 int app_init()
 {
+	//initialize linked lists
 	routes = xmalloc(sizeof(*routes));
+	post_routes = xmalloc(sizeof(*post_routes));
 	__route_files = xmalloc(sizeof(*__route_files));
-	if(!routes || !__route_files)
+	if(!routes || !__route_files || !post_routes){
+		perror("app_init");
 		return -1;
-	else
+	} else {
 		return 0;
+	}
 }
 
 int
@@ -344,23 +385,13 @@ run(unsigned short PORT)
 	socklen_t addrsize;
 
 	int i;
-
-	if (!PORT)
-		PORT = 8000;
-
 	
-	/* Read files to memory */
-	
-
-
-
 	/* Create the socket and set it up to accept connections. */
 	sock = make_socket(PORT);
-	if (listen(sock, 1) < 0) {
+	if (listen(sock, MAX_EVENTS) < 0) {
 		perror("listen");
 		exit(EXIT_FAILURE);
 	}
-
 
 	if ((epollfd = epoll_create1(0)) < 0) {
 		perror("epoll_create1");

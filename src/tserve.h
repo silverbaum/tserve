@@ -8,11 +8,14 @@
 #define GET_ROUTE(routename, func) \
 		append_route(routes, (routename), (func));
 
-struct route {
-	char *name;
-	void (*func)(int);
-};
-
+#define POST_ROUTE(routename, func) \
+		append_route(post_routes, (routename), (func));
+/*
+#define PUT_ROUTE(routename, func) \
+		append_route(put_routes, (routename), (func));
+#define DELETE_ROUTE(routename, func) \
+		append_route(delete_routes, (routename), (func));
+*/
 
 struct route_file {
 	char *name;
@@ -23,22 +26,32 @@ struct route_file {
 };
 
 struct request {
+	int client_fd;
 	char *method;
 	char *path;
 	char *protocol;
+	char *body;
+};
+
+struct route {
+	char *name;
+	void (*func)(struct request*);
 };
 
 extern struct list *routes;
+extern struct list *post_routes;
 
 void get_mime(const char *file_name, struct route_file *route);
 
 struct route_file* load_file(const char *file);
 
+void append_route(struct list *l, char *routename, void(*func)(struct request*));
 
+int get_respond(const struct request *req, const struct route_file *file);
+int get_respond_raw(const struct request *req, const char *response, char* mime);
+int get_respond_text(const struct request *req, const char *response);
+int get_respond_json(const struct request *req, const char *response);
 
-void append_route(struct list *l, char *routename, void(*func)(int));
-
-int get_respond(const int client_fd, const struct route_file *file);
 
 int app_init(void);
 int run(unsigned short PORT);

@@ -39,17 +39,19 @@ die(const char* msg)
 }
 
 
-int write_all(int fd, void *buf, size_t count)
+
+int write_all(int fd, const void *buf, size_t count)
 {
+	const char *buffer = buf;
 	ssize_t tmp;
 	while (count) {
 
 		errno = 0;
-		tmp = write(fd, buf, count);
+		tmp = write(fd, buffer, count);
 		if (tmp > 0) {
 			count -= tmp;
 			if (count)
-				buf = (void *) ((const char *) buf + tmp);
+				buffer = (void *) ((const char *) buffer + tmp);
 		} else if (errno != EINTR && errno != EAGAIN)
 			return -1;
 		if (errno == EAGAIN)	/* Try later, *sigh* */

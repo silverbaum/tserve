@@ -1,19 +1,6 @@
-/*
- * linked lists and vector implementations
- * - LL: append, prepend, delete, insert?
- *
- *   Vec: append, pop, dynamic
- */
-
+// leaked list (c)
 #ifndef _LIST_H
 #define _LIST_H
-
-
-#ifdef DEBUG
-#include <stdio.h>
-#include <stdlib.h>
-#endif
-
 
 #include "util.h"
 
@@ -109,7 +96,6 @@ void list_free(struct list *l)
 	free(l);
 }
 
+
 #endif
-
-
 #endif
